@@ -4,17 +4,36 @@ using namespace caffe;
 using namespace cv;
 using namespace std;
 
-FasterRcnn::FasterRcnn(const std::string modelsPath)
-{
-
-}
-
-FasterRcnn::FasterRcnn(const std::string modelFile, const std::string weightFile):
+FasterRcnn::FasterRcnn(const std::string modelsPath):
     m_fConfThresh(0.8),
     m_fNmsThresh(0.3)
 {
 
+    string modelName = "faster_rcnn_test.prototxt";
+    string weightName = "faster_rcnn_final.caffemodel";
+    string labelsName = "classes.txt";
 
+    if( modelsPath[modelsPath.size() - 1 ] != '/' )
+    {
+        initNet(modelsPath + "/" + modelName, modelsPath + "/" + weightName, modelsPath + "/" + labelsName);
+    }
+    else
+        initNet(modelsPath + modelName, modelsPath + weightName, modelsPath + labelsName);
+
+}
+
+FasterRcnn::FasterRcnn(const std::string modelFile, const std::string weightFile, const std::string labelsFile):
+    m_fConfThresh(0.8),
+    m_fNmsThresh(0.3)
+{
+
+    initNet(modelFile, weightFile, labelsFile);
+}
+
+
+
+void FasterRcnn::initNet(const std::string modelFile, const std::string weightFile, const std::string labelsFile)
+{
 #ifndef CPU_ONLY
     Caffe::set_mode(Caffe::GPU);
 #else
@@ -24,17 +43,27 @@ FasterRcnn::FasterRcnn(const std::string modelFile, const std::string weightFile
     net_.reset(new Net<float>(modelFile, TEST));
     net_->CopyTrainedLayersFrom(weightFile);
 
+    /* Load labels. */
+    std::ifstream labels(labelsFile.c_str());
+    CHECK(labels) << "Unable to open labels file " << labelsFile;
+    string line;
+    while (std::getline(labels, line))
+      m_labels.push_back(string(line));
+    m_labels.insert(m_labels.begin(), "background");
+    caffe::shared_ptr<Blob<float> > cls_output_layer = net_->blob_by_name("cls_prob");
+    CHECK_EQ(m_labels.size(), cls_output_layer->channels())
+      << "Number of labels is different from the output layer dimension.";
 }
 
-void FasterRcnn::detect(const cv::Mat& img, std::map<int, std::vector<cv::Rect> >& rects)
+void FasterRcnn::detect(const cv::Mat& img, std::map<std::string, std::vector<cv::Rect> >& rects)
 {
 
 }
 
 
 void FasterRcnn::detect(const cv::Mat& img,
-                        std::map<int, std::vector<cv::Rect> >& objRects,
-                        std::map<int,std::vector<float> >& confidences)
+                        std::map<std::string, std::vector<cv::Rect> >& objRects,
+                        std::map<std::string, std::vector<float> >& confidences)
 {
     //resize img and normalize
     Mat normalizedImg;
@@ -130,17 +159,18 @@ void FasterRcnn::detect(const cv::Mat& img,
 
         // 将类别i的所有检测框，保存
         vector<cv::Rect> rect(aboxes.size());    //对于类别i，检测出的矩形框
-        for(int ii=0;ii<aboxes.size();++ii)
+        for(int ii=0; ii<aboxes.size(); ++ii)
             rect[ii] = cv::Rect(cv::Point(aboxes[ii].x1,aboxes[ii].y1),cv::Point(aboxes[ii].x2,aboxes[ii].y2));
-        objRects[i] = rect;
 
+        //objRects[i] = rect;
+        objRects.insert(pair<string, vector<Rect> >(m_labels[i], rect) );
 
         // 将类别i的所有检测框的打分，保存
         vector<float> tmp(aboxes.size());       //对于 类别i，检测出的矩形框的得分
-        for(int ii=0;ii<aboxes.size();++ii)
+        for(int ii=0; ii<aboxes.size(); ++ii)
             tmp[ii]=aboxes[ii].score;
 
-        confidences.insert(pair<int,vector<float> >(i,tmp));
+        confidences.insert(pair<string, vector<float> >(m_labels[i], tmp));
 
     }
 
